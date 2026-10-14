@@ -1,0 +1,10 @@
+[package]
+name = "sharemark"
+version = "0.1.0"
+edition = "2021"
+description = "Session, identity, and share-price marks for tokenized stocks on Solana"
+license = "Apache-2.0"
+
+[[bin]]
+name = "sharemark"
+path = "src/bin/quote.rs"
