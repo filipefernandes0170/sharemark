@@ -17,3 +17,5 @@ cargo run -- 1795708800 100000000 8 1.0033 more 180000000 180000000
 The second command is Thanksgiving. It must print `pool price refused`.
 
 The 128-byte account layout is in `src/pack.rs`. Nothing here is deployed.
+
+The desk in `web/` uses the same rules: live New York session, a refused pool price when the market is shut, and a share count that moves only for the "more tokens" dividend.
