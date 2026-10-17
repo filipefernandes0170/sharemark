@@ -16,8 +16,9 @@ export type Quote = {
 const SCALE = 1_000_000_000n;
 const FULL_CLOSE = [
   20260101, 20260119, 20260216, 20260403, 20260525, 20260619, 20260703, 20260907, 20261126, 20261225,
+  20270101, 20270118, 20270215, 20270326, 20270531, 20270618, 20270705, 20270906, 20271125, 20271224,
 ];
-const EARLY_CLOSE = [20261127, 20261224];
+const EARLY_CLOSE = [20261127, 20261224, 20271126];
 
 export type Civil = {
   year: number;
@@ -31,7 +32,7 @@ export type Civil = {
 export function session(unixSeconds: number, forced?: { open: boolean; until: number }): Session {
   if (forced && unixSeconds < forced.until) return forced.open ? "open" : "closed";
   const local = newYork(unixSeconds);
-  if (!local || local.year !== 2026) return "unlisted";
+  if (!local || (local.year !== 2026 && local.year !== 2027)) return "unlisted";
   const ymd = local.year * 10_000 + local.month * 100 + local.day;
   if (FULL_CLOSE.includes(ymd) || local.weekday >= 5) return "closed";
   const close = EARLY_CLOSE.includes(ymd) ? 13 * 60 : 16 * 60;

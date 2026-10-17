@@ -1,5 +1,6 @@
+import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { Ban, Clock3, Scale } from "lucide-react";
+import { Ban, Clock3, RefreshCw } from "lucide-react";
 import {
   clockLabel,
   dollarsToMicro,
@@ -12,26 +13,39 @@ import {
   tokensToRaw,
   type Dividend,
   type Session,
-} from "./sharemark";
+} from "@/lib/sharemark";
 
-const NAMES = [
-  { symbol: "NVDAx", name: "NVIDIA", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "AAPLx", name: "Apple", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "TSLAx", name: "Tesla", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "SPYx", name: "S&P 500", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "QQQx", name: "Nasdaq 100", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "GLDx", name: "Gold", issuer: "xStocks", dividend: "more" as Dividend },
-  { symbol: "Sample", name: "Total-return note", issuer: "Ondo", dividend: "price" as Dividend },
-  { symbol: "Cash", name: "Cash dividend", issuer: "Other", dividend: "cash" as Dividend },
+export const Route = createFileRoute("/")({ component: Desk });
+
+type Stock = {
+  symbol: string;
+  name: string;
+  issuer: string;
+  dividend: Dividend;
+  mint: string;
+};
+
+const STOCKS: Stock[] = [
+  { symbol: "TSLAx", name: "Tesla", issuer: "xStocks", dividend: "more", mint: "XsDoVfqeBukxuZHWhdvWHBhgEHjGNst4MLodqsJHzoB" },
+  { symbol: "NVDAx", name: "NVIDIA", issuer: "xStocks", dividend: "more", mint: "Xsc9qvGR1efVDFGLrVsmkzv3qi45LTBjeUKSPmx9qEh" },
+  { symbol: "AAPLx", name: "Apple", issuer: "xStocks", dividend: "more", mint: "XsbEhLAtcf6HdfpFZ5xEMdqW8nfAvcsP5bdudRLJzJp" },
+  { symbol: "SPYx", name: "S&P 500", issuer: "xStocks", dividend: "more", mint: "XsoCS1TfEyfFhfvj8EtZ528L3CaKBDBRqRapnBbDF2W" },
+  { symbol: "QQQx", name: "Nasdaq 100", issuer: "xStocks", dividend: "more", mint: "Xs8S1uUs1zvS2p7iwtsG3b6fkhpvmwz4GYU3gWAmWHZ" },
 ];
 
 const SAMPLES = [
   { id: "live", label: "Live clock", unix: null },
-  { id: "open", label: "A Wednesday morning", unix: 1791986400 },
+  { id: "open", label: "Wednesday open", unix: 1791986400 },
   { id: "shut", label: "Thanksgiving", unix: 1795708800 },
 ] as const;
 
-export function MarkDesk() {
+function label(state: Session) {
+  if (state === "open") return "Cash market open";
+  if (state === "closed") return "Cash market closed";
+  return "Calendar unlisted";
+}
+
+function Desk() {
   const [now, setNow] = useState<number | null>(null);
   const [sample, setSample] = useState<(typeof SAMPLES)[number]["id"]>("live");
   const [picked, setPicked] = useState(0);
@@ -39,6 +53,8 @@ export function MarkDesk() {
   const [multiplier, setMultiplier] = useState("1");
   const [pool, setPool] = useState("");
   const [issuer, setIssuer] = useState("");
+  const [loading, setLoading] = useState(false);
+  const [priceNote, setPriceNote] = useState("");
 
   useEffect(() => {
     const tick = () => setNow(Math.floor(Date.now() / 1000));
@@ -47,10 +63,28 @@ export function MarkDesk() {
     return () => window.clearInterval(id);
   }, []);
 
-  const name = NAMES[picked];
+  const stock = STOCKS[picked];
   const unix = sample === "live" ? now : SAMPLES.find((item) => item.id === sample)?.unix ?? now;
   const state: Session | null = unix === null || unix === undefined ? null : session(unix);
   const local = unix === null || unix === undefined ? null : newYork(unix);
+
+  async function loadPrice() {
+    setLoading(true);
+    setPriceNote("");
+    try {
+      const res = await fetch(`https://api.dexscreener.com/latest/dex/tokens/${stock.mint}`);
+      if (!res.ok) throw new Error("price");
+      const data = await res.json();
+      const pair = data.pairs?.find((p: { priceUsd?: string }) => p.priceUsd);
+      if (!pair?.priceUsd) throw new Error("none");
+      setPool(Number(pair.priceUsd).toFixed(2));
+      setPriceNote(`Pool ${Number(pair.priceUsd).toFixed(2)} from DexScreener`);
+    } catch {
+      setPriceNote("No pool price returned");
+    } finally {
+      setLoading(false);
+    }
+  }
 
   const result = useMemo(() => {
     if (unix === null || unix === undefined || !state) return null;
@@ -63,7 +97,7 @@ export function MarkDesk() {
     if (issuer.trim() && issuerMicro === null) return "amount" as const;
     return quote({
       session: state,
-      dividend: name.dividend,
+      dividend: stock.dividend,
       decimals: 8,
       rawAmount: raw,
       multiplierNum: mult,
@@ -74,24 +108,27 @@ export function MarkDesk() {
       issuerMicro: issuerMicro ?? undefined,
       issuerAt: issuerMicro ? unix : undefined,
     });
-  }, [issuer, multiplier, name.dividend, pool, state, tokens, unix]);
+  }, [issuer, multiplier, pool, state, stock.dividend, tokens, unix]);
+
+  const refused = result === "pool";
+  const stale = result === "stale";
+  const quoteOk = result && typeof result === "object";
 
   return (
-    <main className="mx-auto flex min-h-screen w-full max-w-5xl flex-col gap-8 px-4 py-8 sm:px-8">
-      <header className="flex flex-col gap-3">
-        <p className="text-sm tracking-widest text-brass uppercase">Sharemark</p>
-        <h1 className="font-serif text-4xl text-fg sm:text-5xl">What is this token worth in shares?</h1>
-        <p className="max-w-2xl text-base leading-relaxed text-muted">
-          The cash market decides whether a pool price is allowed. A dividend either adds tokens, raises the
-          price, or pays cash. It is never counted twice.
+    <main className="mx-auto flex min-h-screen w-full max-w-3xl flex-col gap-8 px-4 py-10">
+      <header className="flex flex-col gap-2">
+        <p className="text-xs tracking-[0.2em] text-brass uppercase">Sharemark</p>
+        <h1 className="text-3xl text-fg sm:text-4xl">What is this token worth in shares?</h1>
+        <p className="max-w-xl text-base leading-relaxed text-muted">
+          The cash market decides whether a pool price is allowed. A dividend either adds tokens, raises the price, or pays cash. It is never counted twice.
         </p>
       </header>
 
-      <section className="grid gap-4 rounded-2xl border border-line bg-surface p-5 sm:grid-cols-[auto_1fr] sm:items-center">
+      <section className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5 sm:flex-row sm:items-center sm:justify-between">
         <div className="flex items-center gap-3">
           <Clock3 className="text-brass" aria-hidden />
           <div>
-            <p className="font-serif text-3xl text-fg">{state ? label(state) : "Reading the clock"}</p>
+            <p className="text-2xl text-fg">{state ? label(state) : "Reading the clock"}</p>
             <p className="text-sm text-muted">{local ? clockLabel(local) : "New York session"}</p>
           </div>
         </div>
@@ -111,132 +148,106 @@ export function MarkDesk() {
         </div>
       </section>
 
-      <section className="grid gap-6 lg:grid-cols-2">
-        <form className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5" onSubmit={(event) => event.preventDefault()}>
+      <section className="grid gap-6 sm:grid-cols-2">
+        <div className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5">
           <label className="flex flex-col gap-2 text-sm text-muted">
             Token
             <select
               value={picked}
-              onChange={(event) => setPicked(Number(event.target.value))}
-              className="min-h-11 rounded-xl border border-line bg-bg px-3 text-base text-fg"
+              onChange={(e) => setPicked(Number(e.target.value))}
+              className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
             >
-              {NAMES.map((item, index) => (
-                <option key={item.symbol} value={index}>
-                  {item.symbol} · {item.name}
+              {STOCKS.map((s, i) => (
+                <option key={s.symbol} value={i}>
+                  {s.symbol} · {s.name}
                 </option>
               ))}
             </select>
           </label>
-          <dl className="grid grid-cols-2 gap-3 text-sm">
-            <div>
-              <dt className="text-muted">Issuer</dt>
-              <dd className="text-fg">{name.issuer}</dd>
-            </div>
-            <div>
-              <dt className="text-muted">Dividend</dt>
-              <dd className="text-fg">{dividendLabel(name.dividend)}</dd>
-            </div>
-          </dl>
-          <Field label="Tokens held" value={tokens} onChange={setTokens} />
-          <Field label="Multiplier" value={multiplier} onChange={setMultiplier} />
-          <button
-            type="button"
-            className="self-start text-sm text-brass underline-offset-4 hover:underline"
-            onClick={() => setMultiplier("1.0033")}
-          >
-            Use 1.0033 as an example
-          </button>
-          <Field label="Pool price, dollars per token" value={pool} onChange={setPool} />
-          <Field label="Share price, dollars" value={issuer} onChange={setIssuer} />
-        </form>
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            Tokens held
+            <input
+              value={tokens}
+              onChange={(e) => setTokens(e.target.value)}
+              inputMode="decimal"
+              className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
+            />
+          </label>
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            Multiplier
+            <input
+              value={multiplier}
+              onChange={(e) => setMultiplier(e.target.value)}
+              inputMode="decimal"
+              className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
+            />
+          </label>
+          <div className="flex items-end gap-2">
+            <label className="flex flex-1 flex-col gap-2 text-sm text-muted">
+              Pool price (USD)
+              <input
+                value={pool}
+                onChange={(e) => setPool(e.target.value)}
+                inputMode="decimal"
+                placeholder="0.00"
+                className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
+              />
+            </label>
+            <button
+              type="button"
+              onClick={loadPrice}
+              disabled={loading}
+              className="flex min-h-11 items-center gap-2 rounded-lg border border-line bg-bg px-3 text-sm text-fg"
+            >
+              <RefreshCw className={loading ? "animate-spin" : ""} size={16} />
+              Fetch
+            </button>
+          </div>
+          <label className="flex flex-col gap-2 text-sm text-muted">
+            Issuer price (USD)
+            <input
+              value={issuer}
+              onChange={(e) => setIssuer(e.target.value)}
+              inputMode="decimal"
+              placeholder="optional"
+              className="min-h-11 rounded-lg border border-line bg-bg px-3 text-fg"
+            />
+          </label>
+          {priceNote && <p className="text-xs text-muted">{priceNote}</p>}
+          <p className="text-xs text-muted">
+            {stock.issuer} · {stock.dividend === "more" ? "more tokens" : stock.dividend} · {stock.mint.slice(0, 6)}…{stock.mint.slice(-4)}
+          </p>
+        </div>
 
-        <Result state={state} dividend={name.dividend} result={result} decimals={8} />
+        <div className="flex flex-col justify-center gap-4 rounded-2xl border border-line bg-surface p-5">
+          {refused && (
+            <div className="flex items-start gap-3">
+              <Ban className="mt-1 text-clay" />
+              <div>
+                <p className="text-xl text-fg">Pool price refused</p>
+                <p className="text-sm text-muted">The cash market is not open. An issuer price is required.</p>
+              </div>
+            </div>
+          )}
+          {stale && (
+            <div>
+              <p className="text-xl text-fg">No fresh price</p>
+              <p className="text-sm text-muted">Enter an issuer price, or wait for the market to open.</p>
+            </div>
+          )}
+          {quoteOk && (
+            <div className="flex flex-col gap-1">
+              <p className="text-sm text-muted">Displayed shares</p>
+              <p className="text-3xl text-fg">{formatUnits(result.shares, 8)}</p>
+              <p className="mt-3 text-sm text-muted">Value</p>
+              <p className="text-3xl text-brass">{formatDollars(result.valueMicroUsd)}</p>
+              {result.diverged && <p className="mt-2 text-sm text-clay">Pool and issuer differ by more than 50 bps.</p>}
+            </div>
+          )}
+          {result === "amount" && <p className="text-sm text-muted">Check the token amount and multiplier.</p>}
+          {!result && <p className="text-sm text-muted">Waiting for the clock.</p>}
+        </div>
       </section>
     </main>
   );
-}
-
-function Field({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
-  return (
-    <label className="flex flex-col gap-2 text-sm text-muted">
-      {label}
-      <input
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-        inputMode="decimal"
-        className="min-h-11 rounded-xl border border-line bg-bg px-3 text-base text-fg"
-      />
-    </label>
-  );
-}
-
-function Result({
-  state,
-  dividend,
-  result,
-  decimals,
-}: {
-  state: Session | null;
-  dividend: Dividend;
-  result: ReturnType<typeof quote> | "amount" | null;
-  decimals: number;
-}) {
-  if (!state || result === null) {
-    return <aside className="rounded-2xl border border-line bg-surface p-5 text-muted">Waiting for the clock.</aside>;
-  }
-  if (result === "pool") {
-    return (
-      <aside className="flex flex-col gap-3 rounded-2xl border border-clay bg-surface p-5">
-        <Ban className="text-clay" aria-hidden />
-        <h2 className="font-serif text-3xl text-fg">Pool price refused</h2>
-        <p className="leading-relaxed text-muted">
-          The cash market is {label(state).toLowerCase()}. Clear the pool price and enter the share price. That is the mark.
-        </p>
-      </aside>
-    );
-  }
-  if (result === "stale" || result === "amount" || result === "multiplier") {
-    return (
-      <aside className="flex flex-col gap-3 rounded-2xl border border-line bg-surface p-5">
-        <Scale className="text-brass" aria-hidden />
-        <h2 className="font-serif text-3xl text-fg">No mark yet</h2>
-        <p className="leading-relaxed text-muted">
-          {result === "stale"
-            ? "Enter a share price. A pool price is not enough while the market is shut."
-            : "Check the token count, the multiplier, and the prices. Use numbers only."}
-        </p>
-      </aside>
-    );
-  }
-  return (
-    <aside className="flex flex-col gap-4 rounded-2xl border border-line bg-surface p-5">
-      <Scale className="text-brass" aria-hidden />
-      <div>
-        <p className="text-sm text-muted">Shares</p>
-        <p className="font-serif text-4xl text-fg">{formatUnits(result.shares, decimals)}</p>
-      </div>
-      <div>
-        <p className="text-sm text-muted">Value</p>
-        <p className="font-serif text-4xl text-fg">{formatDollars(result.valueMicroUsd)}</p>
-      </div>
-      <p className="text-sm leading-relaxed text-muted">
-        {dividend === "more"
-          ? "The multiplier changes the share count."
-          : "The multiplier is ignored. This dividend does not add tokens."}
-        {result.diverged ? " The pool and the share price disagree by more than 0.50%." : ""}
-      </p>
-    </aside>
-  );
-}
-
-function label(state: Session): string {
-  if (state === "open") return "Open";
-  if (state === "closed") return "Closed";
-  return "Unlisted";
-}
-
-function dividendLabel(dividend: Dividend): string {
-  if (dividend === "more") return "More tokens";
-  if (dividend === "price") return "Higher price";
-  return "Cash";
 }
